@@ -4,8 +4,8 @@ class NotificationModel {
   final String title;
   final String message;
   final String type;
-  final bool isRead;
   final Map<String, dynamic>? data;
+  final bool isRead;
   final DateTime createdAt;
 
   NotificationModel({
@@ -14,8 +14,8 @@ class NotificationModel {
     required this.title,
     required this.message,
     required this.type,
-    required this.isRead,
     this.data,
+    required this.isRead,
     required this.createdAt,
   });
 
@@ -26,8 +26,8 @@ class NotificationModel {
       title: json['title'] as String,
       message: json['message'] as String,
       type: json['type'] as String? ?? 'info',
-      isRead: json['is_read'] as bool? ?? false,
       data: json['data'] as Map<String, dynamic>?,
+      isRead: json['is_read'] as bool? ?? false,
       createdAt: DateTime.parse(json['created_at'] as String),
     );
   }
@@ -39,8 +39,8 @@ class NotificationModel {
       'title': title,
       'message': message,
       'type': type,
-      'is_read': isRead,
       'data': data,
+      'is_read': isRead,
       'created_at': createdAt.toIso8601String(),
     };
   }
@@ -51,8 +51,8 @@ class NotificationModel {
     String? title,
     String? message,
     String? type,
-    bool? isRead,
     Map<String, dynamic>? data,
+    bool? isRead,
     DateTime? createdAt,
   }) {
     return NotificationModel(
@@ -61,13 +61,13 @@ class NotificationModel {
       title: title ?? this.title,
       message: message ?? this.message,
       type: type ?? this.type,
-      isRead: isRead ?? this.isRead,
       data: data ?? this.data,
+      isRead: isRead ?? this.isRead,
       createdAt: createdAt ?? this.createdAt,
     );
   }
 
-  String get displayType {
+  String get typeDisplay {
     switch (type.toLowerCase()) {
       case 'success':
         return 'Success';
@@ -81,20 +81,20 @@ class NotificationModel {
     }
   }
 
-  String get timeAgo {
+  String get formattedTime {
     final now = DateTime.now();
     final difference = now.difference(createdAt);
 
-    if (difference.inDays > 7) {
-      return '${createdAt.day}/${createdAt.month}/${createdAt.year}';
-    } else if (difference.inDays > 0) {
-      return '${difference.inDays} day${difference.inDays > 1 ? 's' : ''} ago';
-    } else if (difference.inHours > 0) {
-      return '${difference.inHours} hour${difference.inHours > 1 ? 's' : ''} ago';
-    } else if (difference.inMinutes > 0) {
-      return '${difference.inMinutes} minute${difference.inMinutes > 1 ? 's' : ''} ago';
-    } else {
+    if (difference.inMinutes < 1) {
       return 'Just now';
+    } else if (difference.inHours < 1) {
+      return '${difference.inMinutes}m ago';
+    } else if (difference.inDays < 1) {
+      return '${difference.inHours}h ago';
+    } else if (difference.inDays < 7) {
+      return '${difference.inDays}d ago';
+    } else {
+      return '${createdAt.day}/${createdAt.month}/${createdAt.year}';
     }
   }
 }

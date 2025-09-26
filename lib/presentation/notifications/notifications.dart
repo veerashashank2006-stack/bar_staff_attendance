@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sizer/sizer.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/app_export.dart';
+import '../../models/notification.dart';
+import '../../services/notification_service.dart';
 import './widgets/notification_card_widget.dart';
 import './widgets/notification_detail_widget.dart';
 import './widgets/notification_empty_state_widget.dart';
@@ -16,639 +19,436 @@ class Notifications extends StatefulWidget {
   State<Notifications> createState() => _NotificationsState();
 }
 
-class _NotificationsState extends State<Notifications>
-    with TickerProviderStateMixin {
-  final ScrollController _scrollController = ScrollController();
+class _NotificationsState extends State<Notifications> {
+  final GlobalKey<RefreshIndicatorState> _refreshIndicatorKey =
+      GlobalKey<RefreshIndicatorState>();
+
+  bool _isLoading = true;
+  String? _errorMessage;
+  List<NotificationModel> _notifications = [];
+  List<NotificationModel> _filteredNotifications = [];
   String _searchQuery = '';
-  String _selectedFilter = 'all';
-  bool _isMultiSelectMode = false;
-  Set<String> _selectedNotifications = {};
-  bool _isLoading = false;
-  bool _isRefreshing = false;
-
-  // Mock notifications data
-  final List<Map<String, dynamic>> _allNotifications = [
-    {
-      "id": "1",
-      "type": "attendance",
-      "title": "Clock-in Reminder",
-      "message":
-          "Don't forget to clock in for your shift today. Your shift starts at 9:00 AM.",
-      "timestamp": "2025-01-23T08:30:00.000Z",
-      "isRead": false,
-      "sender": "HR System",
-      "actions": [
-        {"label": "Clock In Now", "icon": "access_time", "route": "/qr-scanner"}
-      ]
-    },
-    {
-      "id": "2",
-      "type": "leave",
-      "title": "Leave Request Approved",
-      "message":
-          "Your leave request for January 25-26, 2025 has been approved by your manager. Enjoy your time off!",
-      "timestamp": "2025-01-22T14:15:00.000Z",
-      "isRead": false,
-      "sender": "Sarah Johnson - Manager",
-      "actions": [
-        {
-          "label": "View Leave Details",
-          "icon": "event_available",
-          "route": "/leave-request"
-        }
-      ]
-    },
-    {
-      "id": "3",
-      "type": "schedule",
-      "title": "Schedule Update",
-      "message":
-          "Your shift on January 24th has been moved from 2:00 PM - 10:00 PM to 3:00 PM - 11:00 PM. Please confirm receipt.",
-      "timestamp": "2025-01-22T10:45:00.000Z",
-      "isRead": true,
-      "sender": "Michael Chen - Supervisor"
-    },
-    {
-      "id": "4",
-      "type": "system",
-      "title": "App Update Available",
-      "message":
-          "A new version of the Bar Staff Attendance app is available. Update now to get the latest features and improvements.",
-      "timestamp": "2025-01-21T16:20:00.000Z",
-      "isRead": true,
-      "sender": "System Administrator"
-    },
-    {
-      "id": "5",
-      "type": "announcement",
-      "title": "New Safety Protocols",
-      "message":
-          "Please review the updated safety protocols effective immediately. All staff must complete the safety training by January 30th.",
-      "timestamp": "2025-01-21T09:00:00.000Z",
-      "isRead": false,
-      "sender": "Operations Team",
-      "actions": [
-        {"label": "View Protocols", "icon": "security", "route": "/settings"}
-      ]
-    },
-    {
-      "id": "6",
-      "type": "attendance",
-      "title": "Missed Clock-out",
-      "message":
-          "You forgot to clock out yesterday. Please contact your supervisor to correct your timesheet.",
-      "timestamp": "2025-01-20T23:59:00.000Z",
-      "isRead": true,
-      "sender": "Attendance System"
-    },
-    {
-      "id": "7",
-      "type": "leave",
-      "title": "Leave Balance Update",
-      "message":
-          "Your leave balance has been updated. You now have 12 vacation days and 5 sick days remaining for this year.",
-      "timestamp": "2025-01-20T12:30:00.000Z",
-      "isRead": true,
-      "sender": "HR Department"
-    },
-    {
-      "id": "8",
-      "type": "schedule",
-      "title": "Extra Shift Available",
-      "message":
-          "An extra shift is available on January 26th from 6:00 PM - 2:00 AM. Contact your manager if interested.",
-      "timestamp": "2025-01-19T15:45:00.000Z",
-      "isRead": false,
-      "sender": "Scheduling Team"
-    }
-  ];
-
-  List<Map<String, dynamic>> get _filteredNotifications {
-    List<Map<String, dynamic>> filtered = _allNotifications;
-
-    // Apply search filter
-    if (_searchQuery.isNotEmpty) {
-      filtered = filtered.where((notification) {
-        final title = (notification['title'] as String? ?? '').toLowerCase();
-        final message =
-            (notification['message'] as String? ?? '').toLowerCase();
-        final sender = (notification['sender'] as String? ?? '').toLowerCase();
-        final query = _searchQuery.toLowerCase();
-
-        return title.contains(query) ||
-            message.contains(query) ||
-            sender.contains(query);
-      }).toList();
-    }
-
-    // Apply type filter
-    if (_selectedFilter != 'all') {
-      if (_selectedFilter == 'unread') {
-        filtered = filtered
-            .where(
-                (notification) => !(notification['isRead'] as bool? ?? false))
-            .toList();
-      } else {
-        filtered = filtered
-            .where((notification) => notification['type'] == _selectedFilter)
-            .toList();
-      }
-    }
-
-    // Sort by timestamp (newest first)
-    filtered.sort((a, b) {
-      final aTime =
-          DateTime.tryParse(a['timestamp'] as String? ?? '') ?? DateTime.now();
-      final bTime =
-          DateTime.tryParse(b['timestamp'] as String? ?? '') ?? DateTime.now();
-      return bTime.compareTo(aTime);
-    });
-
-    return filtered;
-  }
+  String _selectedFilter = 'all'; // all, unread, read
+  RealtimeChannel? _realtimeSubscription;
 
   @override
   void initState() {
     super.initState();
-    _loadNotifications();
+    _initializeNotifications();
+    _subscribeToRealTimeUpdates();
   }
 
   @override
   void dispose() {
-    _scrollController.dispose();
+    _realtimeSubscription?.unsubscribe();
     super.dispose();
   }
 
-  Future<void> _loadNotifications() async {
+  Future<void> _initializeNotifications() async {
     setState(() {
       _isLoading = true;
+      _errorMessage = null;
     });
 
-    // Simulate API call
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    setState(() {
-      _isLoading = false;
-    });
+    try {
+      await _loadNotifications();
+      setState(() => _isLoading = false);
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Failed to load notifications: ${e.toString()}';
+      });
+    }
   }
 
-  Future<void> _refreshNotifications() async {
-    setState(() {
-      _isRefreshing = true;
-    });
+  Future<void> _loadNotifications() async {
+    try {
+      final notifications = await NotificationService.getNotifications();
+      setState(() {
+        _notifications = notifications;
+        _filteredNotifications = notifications;
+      });
+      _applyFilters();
+    } catch (e) {
+      debugPrint('Error loading notifications: $e');
+      throw e;
+    }
+  }
 
-    HapticFeedback.lightImpact();
+  void _subscribeToRealTimeUpdates() {
+    _realtimeSubscription = NotificationService.subscribeToNotifications(
+      onNotificationReceived: (notification) {
+        if (mounted) {
+          setState(() {
+            _notifications.insert(0, notification);
+          });
+          _applyFilters();
 
-    // Simulate API refresh
-    await Future.delayed(const Duration(seconds: 1));
+          // Show snackbar for new notification
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(notification.title),
+              backgroundColor: AppTheme.primary,
+              duration: const Duration(seconds: 3),
+              action: SnackBarAction(
+                label: 'VIEW',
+                textColor: AppTheme.onPrimary,
+                onPressed: () => _onNotificationTap(notification),
+              ),
+            ),
+          );
+        }
+      },
+      onNotificationUpdated: (notificationId) {
+        // Refresh notifications when one is updated
+        _loadNotifications();
+      },
+    );
+  }
 
-    setState(() {
-      _isRefreshing = false;
-    });
+  void _applyFilters() {
+    List<NotificationModel> filtered = _notifications;
+
+    // Apply filter
+    switch (_selectedFilter) {
+      case 'unread':
+        filtered = filtered.where((n) => !n.isRead).toList();
+        break;
+      case 'read':
+        filtered = filtered.where((n) => n.isRead).toList();
+        break;
+      default: // 'all'
+        break;
+    }
+
+    // Apply search
+    if (_searchQuery.isNotEmpty) {
+      filtered = filtered
+          .where((n) =>
+              n.title.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+              n.message.toLowerCase().contains(_searchQuery.toLowerCase()))
+          .toList();
+    }
+
+    setState(() => _filteredNotifications = filtered);
+  }
+
+  Future<void> _onRefresh() async {
+    HapticFeedback.mediumImpact();
+    try {
+      await _loadNotifications();
+      setState(() => _errorMessage = null);
+    } catch (e) {
+      setState(() => _errorMessage = 'Refresh failed: ${e.toString()}');
+    }
   }
 
   void _onSearchChanged(String query) {
-    setState(() {
-      _searchQuery = query;
-    });
+    setState(() => _searchQuery = query);
+    _applyFilters();
   }
 
   void _onFilterChanged(String filter) {
-    setState(() {
-      _selectedFilter = filter;
-    });
+    setState(() => _selectedFilter = filter);
+    _applyFilters();
   }
 
-  void _onNotificationTap(Map<String, dynamic> notification) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => NotificationDetailWidget(
-          notification: notification,
-          onMarkAsRead: () => _markAsRead(notification['id'] as String),
-          onShare: () => _shareNotification(notification),
-        ),
-      ),
-    );
+  Future<void> _onNotificationTap(NotificationModel notification) async {
+    HapticFeedback.lightImpact();
 
-    // Mark as read when opened
-    if (!(notification['isRead'] as bool? ?? false)) {
-      _markAsRead(notification['id'] as String);
+    try {
+      // Mark as read if not already
+      if (!notification.isRead) {
+        await NotificationService.markAsRead(notification.id);
+
+        // Update local state
+        setState(() {
+          final index =
+              _notifications.indexWhere((n) => n.id == notification.id);
+          if (index != -1) {
+            _notifications[index] = notification.copyWith(isRead: true);
+          }
+        });
+        _applyFilters();
+      }
+
+      // Show notification details
+      _showNotificationDetails(notification);
+    } catch (e) {
+      debugPrint('Error marking notification as read: $e');
+      // Still show details even if mark as read fails
+      _showNotificationDetails(notification);
     }
   }
 
-  void _markAsRead(String notificationId) {
-    setState(() {
-      final index =
-          _allNotifications.indexWhere((n) => n['id'] == notificationId);
-      if (index != -1) {
-        _allNotifications[index]['isRead'] = true;
-      }
-    });
-    HapticFeedback.lightImpact();
-  }
-
-  void _deleteNotification(String notificationId) {
-    setState(() {
-      _allNotifications.removeWhere((n) => n['id'] == notificationId);
-      _selectedNotifications.remove(notificationId);
-    });
-    HapticFeedback.mediumImpact();
-  }
-
-  void _shareNotification(Map<String, dynamic> notification) {
-    HapticFeedback.lightImpact();
-    // Implement share functionality
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Sharing: ${notification['title']}'),
-        backgroundColor: AppTheme.primary,
-      ),
-    );
-  }
-
-  void _toggleMultiSelectMode() {
-    setState(() {
-      _isMultiSelectMode = !_isMultiSelectMode;
-      if (!_isMultiSelectMode) {
-        _selectedNotifications.clear();
-      }
-    });
-    HapticFeedback.mediumImpact();
-  }
-
-  void _onSelectionChanged(String notificationId, bool? isSelected) {
-    setState(() {
-      if (isSelected == true) {
-        _selectedNotifications.add(notificationId);
-        if (!_isMultiSelectMode) {
-          _isMultiSelectMode = true;
-        }
-      } else {
-        _selectedNotifications.remove(notificationId);
-        if (_selectedNotifications.isEmpty) {
-          _isMultiSelectMode = false;
-        }
-      }
-    });
-  }
-
-  void _markAllAsRead() {
-    setState(() {
-      for (var notification in _allNotifications) {
-        notification['isRead'] = true;
-      }
-    });
-    HapticFeedback.mediumImpact();
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('All notifications marked as read'),
-        backgroundColor: AppTheme.success,
-      ),
-    );
-  }
-
-  void _deleteSelected() {
-    if (_selectedNotifications.isEmpty) return;
-
-    showDialog(
+  void _showNotificationDetails(NotificationModel notification) {
+    showModalBottomSheet(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Notifications'),
-        content: Text(
-            'Are you sure you want to delete ${_selectedNotifications.length} notification(s)?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              setState(() {
-                _allNotifications.removeWhere(
-                    (n) => _selectedNotifications.contains(n['id']));
-                _selectedNotifications.clear();
-                _isMultiSelectMode = false;
-              });
-              Navigator.pop(context);
-              HapticFeedback.mediumImpact();
-            },
-            child: const Text('Delete'),
-          ),
-        ],
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => NotificationDetailWidget(
+        notification: notification,
+        onDelete: () => _deleteNotification(notification.id),
       ),
     );
   }
 
-  void _deleteReadNotifications() {
-    final readNotifications =
-        _allNotifications.where((n) => n['isRead'] as bool? ?? false).toList();
+  Future<void> _deleteNotification(String notificationId) async {
+    try {
+      await NotificationService.deleteNotification(notificationId);
 
-    if (readNotifications.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No read notifications to delete'),
-          backgroundColor: AppTheme.warning,
-        ),
-      );
-      return;
+      setState(() {
+        _notifications.removeWhere((n) => n.id == notificationId);
+      });
+      _applyFilters();
+
+      if (mounted) {
+        Navigator.pop(context); // Close detail sheet
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Notification deleted'),
+            backgroundColor: AppTheme.success,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error deleting notification: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to delete notification: $e'),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
     }
+  }
 
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Read Notifications'),
-        content: Text(
-            'Are you sure you want to delete ${readNotifications.length} read notification(s)?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+  Future<void> _markAllAsRead() async {
+    try {
+      await NotificationService.markAllAsRead();
+
+      setState(() {
+        _notifications =
+            _notifications.map((n) => n.copyWith(isRead: true)).toList();
+      });
+      _applyFilters();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('All notifications marked as read'),
+            backgroundColor: AppTheme.success,
           ),
-          TextButton(
-            onPressed: () {
-              setState(() {
-                _allNotifications
-                    .removeWhere((n) => n['isRead'] as bool? ?? false);
-              });
-              Navigator.pop(context);
-              HapticFeedback.mediumImpact();
-            },
-            child: const Text('Delete'),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error marking all as read: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to mark all as read: $e'),
+            backgroundColor: AppTheme.error,
           ),
-        ],
-      ),
-    );
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteAllRead() async {
+    try {
+      await NotificationService.deleteAllRead();
+
+      setState(() {
+        _notifications = _notifications.where((n) => !n.isRead).toList();
+      });
+      _applyFilters();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Read notifications deleted'),
+            backgroundColor: AppTheme.success,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error deleting read notifications: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to delete read notifications: $e'),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final filteredNotifications = _filteredNotifications;
+    final unreadCount = _notifications.where((n) => !n.isRead).length;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
-      appBar: AppBar(
-        backgroundColor: colorScheme.surface.withValues(alpha: 0.9),
-        elevation: 0,
-        leading: IconButton(
-          onPressed: () {
-            HapticFeedback.lightImpact();
-            Navigator.pop(context);
-          },
-          icon: CustomIconWidget(
-            iconName: 'arrow_back_ios',
-            color: colorScheme.onSurface,
-            size: 5.w,
-          ),
-          tooltip: 'Back',
+      backgroundColor: AppTheme.background,
+      appBar: _buildAppBar(context, unreadCount),
+      body: RefreshIndicator(
+        key: _refreshIndicatorKey,
+        onRefresh: _onRefresh,
+        color: AppTheme.primary,
+        backgroundColor: colorScheme.surface,
+        child: _isLoading ? _buildLoadingState() : _buildNotificationsContent(),
+      ),
+    );
+  }
+
+  PreferredSizeWidget _buildAppBar(BuildContext context, int unreadCount) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return AppBar(
+      backgroundColor: colorScheme.surface.withValues(alpha: 0.9),
+      elevation: 0,
+      scrolledUnderElevation: 4,
+      leading: IconButton(
+        icon: CustomIconWidget(
+          iconName: Icons.arrow_back.codePoint.toString(),
+          color: colorScheme.onSurface,
+          size: 24,
         ),
-        title: Text(
-          _isMultiSelectMode
-              ? '${_selectedNotifications.length} selected'
-              : 'Notifications',
-          style: theme.textTheme.titleLarge?.copyWith(
-            color: colorScheme.onSurface,
-            fontWeight: FontWeight.w600,
+        onPressed: () => Navigator.pop(context),
+      ),
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Notifications',
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: colorScheme.onSurface,
+              fontWeight: FontWeight.w600,
+            ),
           ),
-        ),
-        actions: [
-          if (_isMultiSelectMode) ...[
-            IconButton(
-              onPressed: _deleteSelected,
-              icon: CustomIconWidget(
-                iconName: 'delete',
-                color: AppTheme.error,
-                size: 5.w,
+          if (unreadCount > 0)
+            Text(
+              '$unreadCount unread',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: AppTheme.primary,
+                fontWeight: FontWeight.w500,
               ),
-              tooltip: 'Delete selected',
             ),
-            IconButton(
-              onPressed: _toggleMultiSelectMode,
-              icon: CustomIconWidget(
-                iconName: 'close',
-                color: colorScheme.onSurface,
-                size: 5.w,
-              ),
-              tooltip: 'Cancel selection',
+        ],
+      ),
+      actions: [
+        if (_notifications.isNotEmpty)
+          PopupMenuButton<String>(
+            icon: CustomIconWidget(
+              iconName: Icons.more_vert.codePoint.toString(),
+              color: colorScheme.onSurface,
+              size: 24,
             ),
-          ] else ...[
-            IconButton(
-              onPressed: _toggleMultiSelectMode,
-              icon: CustomIconWidget(
-                iconName: 'checklist',
-                color: colorScheme.onSurface,
-                size: 5.w,
-              ),
-              tooltip: 'Select notifications',
-            ),
-            PopupMenuButton<String>(
-              onSelected: (value) {
-                switch (value) {
-                  case 'mark_all_read':
-                    _markAllAsRead();
-                    break;
-                  case 'delete_read':
-                    _deleteReadNotifications();
-                    break;
-                  case 'settings':
-                    Navigator.pushNamed(context, '/settings');
-                    break;
-                }
-              },
-              itemBuilder: (context) => [
+            onSelected: (value) {
+              switch (value) {
+                case 'mark_all_read':
+                  _markAllAsRead();
+                  break;
+                case 'delete_read':
+                  _deleteAllRead();
+                  break;
+              }
+            },
+            itemBuilder: (context) => [
+              if (unreadCount > 0)
                 const PopupMenuItem(
                   value: 'mark_all_read',
-                  child: Row(
-                    children: [
-                      Icon(Icons.mark_email_read),
-                      SizedBox(width: 8),
-                      Text('Mark All Read'),
-                    ],
-                  ),
+                  child: Text('Mark all as read'),
                 ),
-                const PopupMenuItem(
-                  value: 'delete_read',
-                  child: Row(
-                    children: [
-                      Icon(Icons.delete_sweep),
-                      SizedBox(width: 8),
-                      Text('Delete Read'),
-                    ],
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: 'settings',
-                  child: Row(
-                    children: [
-                      Icon(Icons.settings),
-                      SizedBox(width: 8),
-                      Text('Settings'),
-                    ],
-                  ),
-                ),
-              ],
-              icon: CustomIconWidget(
-                iconName: 'more_vert',
-                color: colorScheme.onSurface,
-                size: 5.w,
+              const PopupMenuItem(
+                value: 'delete_read',
+                child: Text('Delete read notifications'),
               ),
-            ),
-          ],
-          SizedBox(width: 2.w),
-        ],
+            ],
+          ),
+        SizedBox(width: 2.w),
+      ],
+    );
+  }
+
+  Widget _buildLoadingState() {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      child: Container(
+        height: 80.h,
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(
+                color: AppTheme.primary,
+                strokeWidth: 3,
+              ),
+              SizedBox(height: 3.h),
+              Text(
+                'Loading Notifications...',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurface.withValues(alpha: 0.7),
+                ),
+              ),
+              if (_errorMessage != null) ...[
+                SizedBox(height: 2.h),
+                Text(
+                  _errorMessage!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: AppTheme.error,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ]
+            ],
+          ),
+        ),
       ),
-      body: Column(
-        children: [
-          // Search bar
-          NotificationSearchBarWidget(
-            initialQuery: _searchQuery,
-            onSearchChanged: _onSearchChanged,
-            onClear: () {
-              setState(() {
-                _searchQuery = '';
-              });
-            },
-          ),
+    );
+  }
 
-          // Filter chips
-          NotificationFilterWidget(
-            selectedFilter: _selectedFilter,
-            onFilterChanged: _onFilterChanged,
-          ),
+  Widget _buildNotificationsContent() {
+    return Column(
+      children: [
+        // Search Bar
+        NotificationSearchBarWidget(
+          onSearchChanged: _onSearchChanged,
+        ),
 
-          // Notifications list
-          Expanded(
-            child: _isLoading
-                ? Center(
-                    child: CircularProgressIndicator(
-                      color: AppTheme.primary,
-                    ),
-                  )
-                : filteredNotifications.isEmpty
-                    ? NotificationEmptyStateWidget(
-                        filterType: _selectedFilter,
-                      )
-                    : RefreshIndicator(
-                        onRefresh: _refreshNotifications,
-                        color: AppTheme.primary,
-                        child: ListView.builder(
-                          controller: _scrollController,
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          padding: EdgeInsets.only(bottom: 2.h),
-                          itemCount: filteredNotifications.length,
-                          itemBuilder: (context, index) {
-                            final notification = filteredNotifications[index];
-                            final notificationId = notification['id'] as String;
+        // Filter Chips
+        NotificationFilterWidget(
+          selectedFilter: _selectedFilter,
+          onFilterChanged: _onFilterChanged,
+        ),
 
-                            return NotificationCardWidget(
-                              notification: notification,
-                              onTap: () => _onNotificationTap(notification),
-                              onMarkAsRead: () => _markAsRead(notificationId),
-                              onDelete: () =>
-                                  _deleteNotification(notificationId),
-                              isSelected: _selectedNotifications
-                                  .contains(notificationId),
-                              isMultiSelectMode: _isMultiSelectMode,
-                              onSelectionChanged: (isSelected) =>
-                                  _onSelectionChanged(
-                                      notificationId, isSelected),
-                            );
-                          },
-                        ),
-                      ),
-          ),
-        ],
-      ),
-
-      // Bottom toolbar (multi-select mode)
-      bottomNavigationBar: _isMultiSelectMode
-          ? Container(
-              padding: EdgeInsets.all(4.w),
-              decoration: BoxDecoration(
-                color: colorScheme.surface.withValues(alpha: 0.9),
-                border: Border(
-                  top: BorderSide(
-                    color: colorScheme.outline.withValues(alpha: 0.2),
-                    width: 1,
-                  ),
+        // Notifications List
+        Expanded(
+          child: _filteredNotifications.isEmpty
+              ? NotificationEmptyStateWidget(
+                  filterType: _selectedFilter,
+                )
+              : ListView.builder(
+                  padding: EdgeInsets.symmetric(horizontal: 5.w),
+                  itemCount: _filteredNotifications.length,
+                  itemBuilder: (context, index) {
+                    final notification = _filteredNotifications[index];
+                    return NotificationCardWidget(
+                      notification: notification.toJson(),
+                      onTap: () => _onNotificationTap(notification),
+                      onDelete: () => _deleteNotification(notification.id),
+                    );
+                  },
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: colorScheme.shadow,
-                    blurRadius: 8,
-                    offset: const Offset(0, -2),
-                  ),
-                ],
-              ),
-              child: SafeArea(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _selectedNotifications.isEmpty
-                            ? null
-                            : () {
-                                for (final id in _selectedNotifications) {
-                                  _markAsRead(id);
-                                }
-                                setState(() {
-                                  _selectedNotifications.clear();
-                                  _isMultiSelectMode = false;
-                                });
-                              },
-                        icon: CustomIconWidget(
-                          iconName: 'mark_email_read',
-                          color: _selectedNotifications.isEmpty
-                              ? colorScheme.onSurface.withValues(alpha: 0.3)
-                              : AppTheme.primary,
-                          size: 4.w,
-                        ),
-                        label: Text(
-                          'Mark Read',
-                          style: theme.textTheme.labelLarge?.copyWith(
-                            color: _selectedNotifications.isEmpty
-                                ? colorScheme.onSurface.withValues(alpha: 0.3)
-                                : AppTheme.primary,
-                          ),
-                        ),
-                      ),
-                    ),
-                    SizedBox(width: 4.w),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: _selectedNotifications.isEmpty
-                            ? null
-                            : _deleteSelected,
-                        icon: CustomIconWidget(
-                          iconName: 'delete',
-                          color: _selectedNotifications.isEmpty
-                              ? colorScheme.onSurface.withValues(alpha: 0.3)
-                              : AppTheme.onPrimary,
-                          size: 4.w,
-                        ),
-                        label: Text(
-                          'Delete',
-                          style: theme.textTheme.labelLarge?.copyWith(
-                            color: _selectedNotifications.isEmpty
-                                ? colorScheme.onSurface.withValues(alpha: 0.3)
-                                : AppTheme.onPrimary,
-                          ),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _selectedNotifications.isEmpty
-                              ? colorScheme.surface
-                              : AppTheme.error,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          : null,
+        ),
+      ],
     );
   }
 }

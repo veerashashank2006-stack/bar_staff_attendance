@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:sizer/sizer.dart';
 
 import '../../core/app_export.dart';
+import '../../services/auth_service.dart';
 import './widgets/bar_logo_widget.dart';
 import './widgets/login_form_widget.dart';
 
@@ -15,66 +16,71 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen>
     with TickerProviderStateMixin {
-  bool _isLoading = false;
-  String? _errorMessage;
-  late AnimationController _fadeController;
-  late AnimationController _slideController;
-  late Animation<double> _fadeAnimation;
+  late AnimationController _animationController;
+  late Animation<double> _fadeInAnimation;
   late Animation<Offset> _slideAnimation;
 
-  // Mock credentials for testing
-  final Map<String, String> _mockCredentials = {
-    '12345': 'password123',
-    '67890': 'staff2023',
-    '11111': 'admin123',
-  };
+  bool _isLoading = false;
+  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
-    _initializeAnimations();
-    _loadStoredEmployeeId();
+    _setupAnimations();
+    _checkExistingAuth();
   }
 
-  void _initializeAnimations() {
-    _fadeController = AnimationController(
-      duration: const Duration(milliseconds: 1000),
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  void _setupAnimations() {
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 1500),
       vsync: this,
     );
 
-    _slideController = AnimationController(
-      duration: const Duration(milliseconds: 800),
-      vsync: this,
-    );
-
-    _fadeAnimation = Tween<double>(
+    _fadeInAnimation = Tween<double>(
       begin: 0.0,
       end: 1.0,
     ).animate(CurvedAnimation(
-      parent: _fadeController,
-      curve: Curves.easeInOut,
+      parent: _animationController,
+      curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
     ));
 
     _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.3),
+      begin: const Offset(0.0, 0.3),
       end: Offset.zero,
     ).animate(CurvedAnimation(
-      parent: _slideController,
-      curve: Curves.easeOutCubic,
+      parent: _animationController,
+      curve: const Interval(0.3, 1.0, curve: Curves.easeOutBack),
     ));
 
-    // Start animations
-    _fadeController.forward();
-    _slideController.forward();
+    _animationController.forward();
   }
 
-  void _loadStoredEmployeeId() {
-    // TODO: Load stored employee ID from secure storage
-    // This would be implemented with flutter_secure_storage
+  Future<void> _checkExistingAuth() async {
+    // Check if user is already signed in
+    if (AuthService.isAuthenticated) {
+      try {
+        final profile = await AuthService.getCurrentUserProfile();
+        if (profile != null && mounted) {
+          Navigator.pushReplacementNamed(context, AppRoutes.dashboard);
+        }
+      } catch (e) {
+        // If profile fetch fails, continue with login
+        debugPrint('Profile fetch failed during auth check: $e');
+      }
+    }
   }
 
-  Future<void> _handleLogin(String employeeId, String password) async {
-    if (_isLoading) return;
+  Future<void> _handleLogin({
+    required String email,
+    required String password,
+  }) async {
+    if (!mounted) return;
 
     setState(() {
       _isLoading = true;
@@ -82,54 +88,55 @@ class _LoginScreenState extends State<LoginScreen>
     });
 
     try {
-      // Simulate network delay
-      await Future.delayed(const Duration(milliseconds: 1500));
+      // Perform authentication
+      final response =
+          await AuthService.signIn(email: email, password: password);
 
-      // Check mock credentials
-      if (_mockCredentials.containsKey(employeeId) &&
-          _mockCredentials[employeeId] == password) {
-        // Success haptic feedback
-        HapticFeedback.mediumImpact();
+      if (response.user != null) {
+        // Get user profile to ensure it exists
+        final profile = await AuthService.getCurrentUserProfile();
 
-        // TODO: Store authentication token securely
-        // TODO: Store employee ID for future logins
-
-        // Navigate to dashboard
-        if (mounted) {
-          Navigator.pushReplacementNamed(context, '/dashboard');
+        if (profile != null && mounted) {
+          // Success - navigate to dashboard
+          HapticFeedback.lightImpact();
+          Navigator.pushReplacementNamed(context, AppRoutes.dashboard);
+        } else {
+          throw Exception(
+              'User profile not found. Please contact administrator.');
         }
       } else {
-        // Invalid credentials
-        setState(() {
-          _errorMessage = 'Invalid Employee ID or Password. Please try again.';
-        });
-        HapticFeedback.heavyImpact();
+        throw Exception('Authentication failed. Please try again.');
       }
     } catch (e) {
-      // Network or other error
-      setState(() {
-        _errorMessage =
-            'Unable to connect. Please check your internet connection and try again.';
-      });
-      HapticFeedback.heavyImpact();
-    } finally {
       if (mounted) {
         setState(() {
           _isLoading = false;
+          _errorMessage = _getErrorMessage(e.toString());
         });
+        HapticFeedback.heavyImpact();
       }
     }
   }
 
-  void _dismissKeyboard() {
-    FocusScope.of(context).unfocus();
+  String _getErrorMessage(String error) {
+    if (error.contains('Invalid login credentials')) {
+      return 'Invalid email or password. Please try again.';
+    } else if (error.contains('Email not confirmed')) {
+      return 'Please check your email and confirm your account.';
+    } else if (error.contains('Too many requests')) {
+      return 'Too many login attempts. Please wait a moment and try again.';
+    } else if (error.contains('User profile not found')) {
+      return 'Account not found. Please contact your administrator.';
+    } else if (error.contains('network')) {
+      return 'Network error. Please check your connection and try again.';
+    }
+    return 'Login failed. Please try again.';
   }
 
-  @override
-  void dispose() {
-    _fadeController.dispose();
-    _slideController.dispose();
-    super.dispose();
+  void _clearError() {
+    if (_errorMessage != null) {
+      setState(() => _errorMessage = null);
+    }
   }
 
   @override
@@ -138,151 +145,141 @@ class _LoginScreenState extends State<LoginScreen>
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
-      body: GestureDetector(
-        onTap: _dismissKeyboard,
-        child: SafeArea(
-          child: SingleChildScrollView(
-            physics: const BouncingScrollPhysics(),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                minHeight: MediaQuery.of(context).size.height -
-                    MediaQuery.of(context).padding.top -
-                    MediaQuery.of(context).padding.bottom,
-              ),
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      colorScheme.surface,
-                      colorScheme.surface.withValues(alpha: 0.3),
-                      colorScheme.surface,
-                    ],
-                    stops: const [0.0, 0.5, 1.0],
-                  ),
+      backgroundColor: AppTheme.background,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Container(
+            height: 95.h,
+            padding: EdgeInsets.symmetric(horizontal: 6.w),
+            child: Column(
+              children: [
+                SizedBox(height: 8.h),
+
+                // Logo Section
+                FadeTransition(
+                  opacity: _fadeInAnimation,
+                  child: const BarLogoWidget(),
                 ),
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 6.w),
-                  child: Column(
-                    children: [
-                      SizedBox(height: 8.h),
 
-                      // Logo Section with Fade Animation
-                      FadeTransition(
-                        opacity: _fadeAnimation,
-                        child: const BarLogoWidget(),
-                      ),
+                SizedBox(height: 6.h),
 
-                      SizedBox(height: 4.h),
-
-                      // Login Form with Slide Animation
-                      SlideTransition(
-                        position: _slideAnimation,
-                        child: FadeTransition(
-                          opacity: _fadeAnimation,
-                          child: Container(
-                            padding: EdgeInsets.all(4.w),
-                            decoration: BoxDecoration(
-                              color:
-                                  colorScheme.surface.withValues(alpha: 0.05),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color:
-                                    colorScheme.outline.withValues(alpha: 0.1),
-                                width: 1,
-                              ),
-                            ),
-                            child: const LoginFormWidget(),
+                // Welcome Text
+                SlideTransition(
+                  position: _slideAnimation,
+                  child: FadeTransition(
+                    opacity: _fadeInAnimation,
+                    child: Column(
+                      children: [
+                        Text(
+                          'Welcome Back',
+                          style: theme.textTheme.headlineSmall?.copyWith(
+                            color: colorScheme.onSurface,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
-                      ),
-
-                      // Error Message
-                      if (_errorMessage != null) ...[
-                        SizedBox(height: 2.h),
-                        AnimatedContainer(
-                          duration: const Duration(milliseconds: 300),
-                          padding: EdgeInsets.all(3.w),
-                          decoration: BoxDecoration(
-                            color: colorScheme.error.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: colorScheme.error.withValues(alpha: 0.3),
-                              width: 1,
-                            ),
+                        SizedBox(height: 1.h),
+                        Text(
+                          'Sign in to access your attendance dashboard',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: colorScheme.onSurface.withValues(alpha: 0.7),
                           ),
-                          child: Row(
-                            children: [
-                              CustomIconWidget(
-                                iconName: 'error_outline',
-                                color: colorScheme.error,
-                                size: 20,
-                              ),
-                              SizedBox(width: 2.w),
-                              Expanded(
-                                child: Text(
-                                  _errorMessage!,
-                                  style: GoogleFonts.inter(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w400,
-                                    color: colorScheme.error,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+                          textAlign: TextAlign.center,
                         ),
                       ],
+                    ),
+                  ),
+                ),
 
-                      SizedBox(height: 6.h),
+                SizedBox(height: 6.h),
 
-                      // Footer Information
-                      FadeTransition(
-                        opacity: _fadeAnimation,
-                        child: Column(
-                          children: [
-                            Text(
-                              'Secure Authentication',
-                              style: GoogleFonts.inter(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w400,
-                                color: colorScheme.onSurface
-                                    .withValues(alpha: 0.5),
-                              ),
-                            ),
-                            SizedBox(height: 1.h),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                CustomIconWidget(
-                                  iconName: 'security',
-                                  color: colorScheme.primary
-                                      .withValues(alpha: 0.7),
-                                  size: 16,
-                                ),
-                                SizedBox(width: 1.w),
-                                Text(
-                                  'SSL Encrypted',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w400,
-                                    color: colorScheme.onSurface
-                                        .withValues(alpha: 0.5),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
+                // Error Message
+                if (_errorMessage != null)
+                  SlideTransition(
+                    position: _slideAnimation,
+                    child: Container(
+                      width: double.infinity,
+                      margin: EdgeInsets.only(bottom: 3.h),
+                      padding: EdgeInsets.all(4.w),
+                      decoration: BoxDecoration(
+                        color: AppTheme.error.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: AppTheme.error.withValues(alpha: 0.3),
+                          width: 1,
                         ),
                       ),
+                      child: Row(
+                        children: [
+                          CustomIconWidget(
+                            iconName: Icons.error_outline.codePoint.toString(),
+                            color: AppTheme.error,
+                            size: 20,
+                          ),
+                          SizedBox(width: 3.w),
+                          Expanded(
+                            child: Text(
+                              _errorMessage!,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: AppTheme.error,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            icon: CustomIconWidget(
+                              iconName: Icons.close.codePoint.toString(),
+                              color: AppTheme.error,
+                              size: 16,
+                            ),
+                            onPressed: _clearError,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
 
-                      SizedBox(height: 4.h),
+                // Login Form
+                Expanded(
+                  child: SlideTransition(
+                    position: _slideAnimation,
+                    child: FadeTransition(
+                      opacity: _fadeInAnimation,
+                      child: LoginFormWidget(),
+                    ),
+                  ),
+                ),
+
+                // Preview Mode Notice (for Rocket Platform)
+                Container(
+                  margin: EdgeInsets.only(bottom: 3.h),
+                  padding: EdgeInsets.all(3.w),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: AppTheme.primary.withValues(alpha: 0.3),
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      CustomIconWidget(
+                        iconName: Icons.info_outline.codePoint.toString(),
+                        color: AppTheme.primary,
+                        size: 16,
+                      ),
+                      SizedBox(width: 2.w),
+                      Expanded(
+                        child: Text(
+                          'Demo Mode: Create an account or use existing credentials',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: AppTheme.primary,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
-              ),
+              ],
             ),
           ),
         ),

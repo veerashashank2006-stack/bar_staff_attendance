@@ -3,6 +3,12 @@ import 'package:flutter/services.dart';
 import 'package:sizer/sizer.dart';
 
 import '../../core/app_export.dart';
+import '../../models/attendance_record.dart';
+import '../../models/notification.dart';
+import '../../models/user_profile.dart';
+import '../../services/attendance_service.dart';
+import '../../services/auth_service.dart';
+import '../../services/notification_service.dart';
 import './widgets/attendance_card_widget.dart';
 import './widgets/dashboard_drawer_widget.dart';
 import './widgets/quick_links_widget.dart';
@@ -20,74 +26,16 @@ class _DashboardState extends State<Dashboard> with TickerProviderStateMixin {
   final GlobalKey<RefreshIndicatorState> _refreshIndicatorKey =
       GlobalKey<RefreshIndicatorState>();
 
-  bool _isLoading = false;
+  bool _isLoading = true;
   bool _isOnline = true;
   DateTime _lastSyncTime = DateTime.now();
+  String? _errorMessage;
 
-  // Mock user data
-  final Map<String, dynamic> _userData = {
-    "id": "EMP001",
-    "name": "Sarah Johnson",
-    "email": "sarah.johnson@barstaff.com",
-    "avatar":
-        "https://images.unsplash.com/photo-1494790108755-2616b612b786?w=400&h=400&fit=crop&crop=face",
-    "role": "Bartender",
-    "department": "Bar Operations"
-  };
-
-  // Mock attendance data
-  Map<String, dynamic> _attendanceData = {
-    "loginTime": "9:15 AM",
-    "logoutTime": null,
-    "hoursWorked": "4h 23m",
-    "status": "Clocked In",
-    "date": "2025-09-23",
-    "isLate": false
-  };
-
-  // Mock recent activities
-  final List<Map<String, dynamic>> _recentActivities = [
-    {
-      "id": 1,
-      "type": "clock_in",
-      "description": "Clocked in for morning shift",
-      "timestamp": "Today, 9:15 AM",
-      "status": "completed",
-      "location": "Main Bar"
-    },
-    {
-      "id": 2,
-      "type": "leave_approved",
-      "description": "Annual leave request approved",
-      "timestamp": "Yesterday, 3:30 PM",
-      "status": "approved",
-      "duration": "2 days"
-    },
-    {
-      "id": 3,
-      "type": "clock_out",
-      "description": "Clocked out from evening shift",
-      "timestamp": "Yesterday, 11:45 PM",
-      "status": "completed",
-      "location": "Main Bar"
-    },
-    {
-      "id": 4,
-      "type": "leave_request",
-      "description": "Sick leave request submitted",
-      "timestamp": "Sep 21, 2:15 PM",
-      "status": "pending",
-      "duration": "1 day"
-    },
-    {
-      "id": 5,
-      "type": "clock_in",
-      "description": "Clocked in for weekend shift",
-      "timestamp": "Sep 21, 6:00 PM",
-      "status": "completed",
-      "location": "Rooftop Bar"
-    }
-  ];
+  // Live data from Supabase
+  UserProfile? _userProfile;
+  AttendanceRecord? _todayAttendance;
+  List<NotificationModel> _recentNotifications = [];
+  List<AttendanceRecord> _recentAttendance = [];
 
   @override
   void initState() {
@@ -96,91 +44,221 @@ class _DashboardState extends State<Dashboard> with TickerProviderStateMixin {
   }
 
   Future<void> _initializeDashboard() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
 
     try {
-      // Simulate data loading and sync
-      await Future.delayed(const Duration(milliseconds: 800));
+      // Check if user is authenticated
+      if (!AuthService.isAuthenticated) {
+        Navigator.pushNamedAndRemoveUntil(
+            context, AppRoutes.login, (route) => false);
+        return;
+      }
 
-      // Check connectivity and sync data
-      await _syncDataWithServer();
+      // Load user data and dashboard information
+      await _loadDashboardData();
 
       setState(() {
         _isLoading = false;
+        _isOnline = true;
         _lastSyncTime = DateTime.now();
       });
     } catch (e) {
       setState(() {
         _isLoading = false;
         _isOnline = false;
+        _errorMessage = 'Failed to load dashboard data: ${e.toString()}';
       });
+      debugPrint('Dashboard initialization error: $e');
     }
   }
 
-  Future<void> _syncDataWithServer() async {
+  Future<void> _loadDashboardData() async {
     try {
-      // Simulate API call to sync attendance data
-      await Future.delayed(const Duration(milliseconds: 500));
+      // Load user profile
+      _userProfile = await AuthService.getCurrentUserProfile();
 
-      // Update attendance data with latest info
-      setState(() {
-        _isOnline = true;
-        _lastSyncTime = DateTime.now();
-      });
+      // Load today's attendance
+      _todayAttendance = await AttendanceService.getTodayAttendance();
 
-      // Show sync success with haptic feedback
-      HapticFeedback.lightImpact();
+      // Load recent attendance records (last 5)
+      _recentAttendance =
+          await AttendanceService.getMyAttendanceRecords(limit: 5);
+
+      // Load recent notifications (last 5)
+      _recentNotifications =
+          await NotificationService.getNotifications(limit: 5);
     } catch (e) {
-      setState(() => _isOnline = false);
+      debugPrint('Error loading dashboard data: $e');
+      throw e;
     }
   }
 
   Future<void> _onRefresh() async {
     HapticFeedback.mediumImpact();
-    await _syncDataWithServer();
 
-    // Update attendance hours worked simulation
-    final currentHours =
-        int.parse(_attendanceData['hoursWorked'].toString().split('h')[0]);
-    final currentMinutes = int.parse(_attendanceData['hoursWorked']
-        .toString()
-        .split('h')[1]
-        .split('m')[0]
-        .trim());
-    final newMinutes = currentMinutes + 1;
-
-    setState(() {
-      if (newMinutes >= 60) {
-        _attendanceData['hoursWorked'] = '${currentHours + 1}h 0m';
-      } else {
-        _attendanceData['hoursWorked'] = '${currentHours}h ${newMinutes}m';
-      }
-    });
+    try {
+      await _loadDashboardData();
+      setState(() {
+        _isOnline = true;
+        _lastSyncTime = DateTime.now();
+        _errorMessage = null;
+      });
+    } catch (e) {
+      setState(() {
+        _isOnline = false;
+        _errorMessage = 'Sync failed: ${e.toString()}';
+      });
+    }
   }
 
   void _onQuickScanTap() {
     HapticFeedback.lightImpact();
-    Navigator.pushNamed(context, '/qr-scanner');
+    Navigator.pushNamed(context, AppRoutes.qrScanner);
   }
 
   void _onAttendanceReportsTap() {
     HapticFeedback.lightImpact();
-    Navigator.pushNamed(context, '/attendance-reports');
+    Navigator.pushNamed(context, AppRoutes.attendanceReports);
   }
 
   void _onLeaveBalanceTap() {
     HapticFeedback.lightImpact();
-    Navigator.pushNamed(context, '/leave-request');
+    Navigator.pushNamed(context, AppRoutes.leaveRequest);
   }
 
-  void _onLogout() {
+  void _onLogout() async {
     HapticFeedback.mediumImpact();
-    // Clear any stored data and navigate to login
-    Navigator.pushNamedAndRemoveUntil(
-      context,
-      '/login-screen',
-      (route) => false,
-    );
+    try {
+      await AuthService.signOut();
+      if (mounted) {
+        Navigator.pushNamedAndRemoveUntil(
+          context,
+          AppRoutes.login,
+          (route) => false,
+        );
+      }
+    } catch (e) {
+      debugPrint('Logout error: $e');
+      // Still navigate to login even if logout fails
+      Navigator.pushNamedAndRemoveUntil(
+        context,
+        AppRoutes.login,
+        (route) => false,
+      );
+    }
+  }
+
+  // Convert attendance records to activity format for UI compatibility
+  List<Map<String, dynamic>> get _formattedRecentActivities {
+    List<Map<String, dynamic>> activities = [];
+
+    // Add attendance records
+    for (var record in _recentAttendance) {
+      activities.add({
+        "id": record.id,
+        "type": record.checkInTime != null && record.checkOutTime != null
+            ? "clock_out"
+            : "clock_in",
+        "description": record.checkOutTime != null
+            ? "Clocked out - ${record.displayStatus}"
+            : "Clocked in - ${record.displayStatus}",
+        "timestamp": _formatTimestamp(record.checkInTime ?? record.createdAt),
+        "status": "completed",
+        "duration": record.formattedWorkingHours,
+      });
+    }
+
+    // Add recent notifications
+    for (var notification in _recentNotifications.take(3)) {
+      String type = "info";
+      if (notification.type == "success")
+        type = "leave_approved";
+      else if (notification.type == "warning")
+        type = "leave_request";
+      else if (notification.title.toLowerCase().contains("leave"))
+        type = "leave_request";
+
+      activities.add({
+        "id": notification.id,
+        "type": type,
+        "description": notification.title,
+        "timestamp": _formatTimestamp(notification.createdAt),
+        "status": notification.type,
+        "message": notification.message,
+      });
+    }
+
+    // Sort by timestamp (most recent first)
+    activities.sort((a, b) {
+      return _parseTimestamp(b["timestamp"])
+          .compareTo(_parseTimestamp(a["timestamp"]));
+    });
+
+    return activities.take(5).toList();
+  }
+
+  String _formatTimestamp(DateTime dateTime) {
+    final now = DateTime.now();
+    final difference = now.difference(dateTime);
+
+    if (difference.inDays == 0) {
+      return "Today, ${_formatTime(dateTime)}";
+    } else if (difference.inDays == 1) {
+      return "Yesterday, ${_formatTime(dateTime)}";
+    } else if (difference.inDays < 7) {
+      return "${difference.inDays} days ago";
+    } else {
+      return "${dateTime.day}/${dateTime.month}/${dateTime.year}";
+    }
+  }
+
+  DateTime _parseTimestamp(String timestamp) {
+    // Simple parsing for sorting - can be improved
+    if (timestamp.startsWith("Today")) return DateTime.now();
+    if (timestamp.startsWith("Yesterday"))
+      return DateTime.now().subtract(const Duration(days: 1));
+    return DateTime.now().subtract(const Duration(days: 7)); // Default fallback
+  }
+
+  String _formatTime(DateTime dateTime) {
+    final hour = dateTime.hour == 0
+        ? 12
+        : (dateTime.hour > 12 ? dateTime.hour - 12 : dateTime.hour);
+    final minute = dateTime.minute.toString().padLeft(2, '0');
+    final ampm = dateTime.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $ampm';
+  }
+
+  // Convert today's attendance to widget format
+  Map<String, dynamic> get _formattedAttendanceData {
+    if (_todayAttendance == null) {
+      return {
+        "loginTime": null,
+        "logoutTime": null,
+        "hoursWorked": "0h 0m",
+        "status": "Not Clocked In",
+        "date": DateTime.now().toString().split(' ')[0],
+        "isLate": false
+      };
+    }
+
+    return {
+      "loginTime": _todayAttendance!.checkInTime != null
+          ? _formatTime(_todayAttendance!.checkInTime!)
+          : null,
+      "logoutTime": _todayAttendance!.checkOutTime != null
+          ? _formatTime(_todayAttendance!.checkOutTime!)
+          : null,
+      "hoursWorked": _todayAttendance!.formattedWorkingHours,
+      "status": _todayAttendance!.checkOutTime != null
+          ? "Clocked Out"
+          : (_todayAttendance!.checkInTime != null ? "Clocked In" : "Not Clocked In"),
+      "date": _todayAttendance!.date.toString().split(' ')[0],
+      "isLate": _todayAttendance!.status == AttendanceStatus.late
+    };
   }
 
   @override
@@ -192,13 +270,15 @@ class _DashboardState extends State<Dashboard> with TickerProviderStateMixin {
       key: _scaffoldKey,
       backgroundColor: AppTheme.background,
       appBar: _buildAppBar(context),
-      drawer: DashboardDrawerWidget(
-        userName: _userData['name'] as String,
-        userEmail: _userData['email'] as String,
-        userAvatar: _userData['avatar'] as String?,
-        currentRoute: '/dashboard',
-        onLogout: _onLogout,
-      ),
+      drawer: _userProfile != null
+          ? DashboardDrawerWidget(
+              userName: _userProfile!.fullName,
+              userEmail: _userProfile!.email,
+              userAvatar: _userProfile!.profileImageUrl,
+              currentRoute: AppRoutes.dashboard,
+              onLogout: _onLogout,
+            )
+          : null,
       body: RefreshIndicator(
         key: _refreshIndicatorKey,
         onRefresh: _onRefresh,
@@ -239,7 +319,7 @@ class _DashboardState extends State<Dashboard> with TickerProviderStateMixin {
             ),
           ),
           Text(
-            _userData['name'] as String,
+            _userProfile?.fullName.split(' ').first ?? 'User',
             style: theme.textTheme.titleMedium?.copyWith(
               color: colorScheme.onSurface,
               fontWeight: FontWeight.w600,
@@ -273,17 +353,34 @@ class _DashboardState extends State<Dashboard> with TickerProviderStateMixin {
           ),
         ),
 
-        // Notifications
-        IconButton(
-          icon: CustomIconWidget(
-            iconName: Icons.notifications_outlined.codePoint.toString(),
-            color: colorScheme.onSurface,
-            size: 24,
-          ),
-          onPressed: () {
-            HapticFeedback.lightImpact();
-            Navigator.pushNamed(context, '/notifications');
-          },
+        // Notifications with badge
+        Stack(
+          children: [
+            IconButton(
+              icon: CustomIconWidget(
+                iconName: Icons.notifications_outlined.codePoint.toString(),
+                color: colorScheme.onSurface,
+                size: 24,
+              ),
+              onPressed: () {
+                HapticFeedback.lightImpact();
+                Navigator.pushNamed(context, AppRoutes.notifications);
+              },
+            ),
+            if (_recentNotifications.where((n) => !n.isRead).isNotEmpty)
+              Positioned(
+                right: 8,
+                top: 8,
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: AppTheme.error,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+          ],
         ),
         SizedBox(width: 2.w),
       ],
@@ -313,6 +410,16 @@ class _DashboardState extends State<Dashboard> with TickerProviderStateMixin {
                   color: colorScheme.onSurface.withValues(alpha: 0.7),
                 ),
               ),
+              if (_errorMessage != null) ...[
+                SizedBox(height: 2.h),
+                Text(
+                  _errorMessage!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: AppTheme.error,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ]
             ],
           ),
         ),
@@ -331,9 +438,12 @@ class _DashboardState extends State<Dashboard> with TickerProviderStateMixin {
           // Sync Status Banner (if offline)
           if (!_isOnline) _buildOfflineBanner(),
 
+          // Error Banner (if any)
+          if (_errorMessage != null) _buildErrorBanner(),
+
           // Today's Attendance Card
           AttendanceCardWidget(
-            attendanceData: _attendanceData,
+            attendanceData: _formattedAttendanceData,
             onTap: _onAttendanceReportsTap,
           ),
 
@@ -349,7 +459,7 @@ class _DashboardState extends State<Dashboard> with TickerProviderStateMixin {
 
           // Recent Activity
           RecentActivityWidget(
-            activities: _recentActivities,
+            activities: _formattedRecentActivities,
           ),
 
           SizedBox(height: 10.h), // Space for FAB
@@ -400,6 +510,64 @@ class _DashboardState extends State<Dashboard> with TickerProviderStateMixin {
                 ),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorBanner() {
+    final theme = Theme.of(context);
+
+    return Container(
+      width: double.infinity,
+      margin: EdgeInsets.symmetric(horizontal: 5.w, vertical: 1.h),
+      padding: EdgeInsets.all(3.w),
+      decoration: BoxDecoration(
+        color: AppTheme.error.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: AppTheme.error.withValues(alpha: 0.3),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          CustomIconWidget(
+            iconName: Icons.error_outline.codePoint.toString(),
+            color: AppTheme.error,
+            size: 20,
+          ),
+          SizedBox(width: 3.w),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Sync Error',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: AppTheme.error,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  'Pull down to refresh and try again',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: AppTheme.error.withValues(alpha: 0.8),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: CustomIconWidget(
+              iconName: Icons.close.codePoint.toString(),
+              color: AppTheme.error,
+              size: 16,
+            ),
+            onPressed: () {
+              setState(() => _errorMessage = null);
+            },
           ),
         ],
       ),

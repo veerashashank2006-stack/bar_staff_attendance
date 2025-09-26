@@ -1,299 +1,264 @@
--- Location: supabase/migrations/20250923145243_attendance_management_with_auth.sql
--- Schema Analysis: Fresh project - no existing tables
--- Integration Type: Complete new implementation
--- Dependencies: None - creating all new tables
+-- ============================================================
+-- File: 20250923145243_attendance_management_with_auth.sql
+-- Purpose: Full attendance & leave-management schema with auth
+-- ============================================================
 
--- 1. Extensions & Types
-CREATE TYPE public.user_role AS ENUM ('admin', 'manager', 'employee');
-CREATE TYPE public.attendance_status AS ENUM ('present', 'absent', 'late', 'half_day');
-CREATE TYPE public.leave_status AS ENUM ('pending', 'approved', 'rejected');
-CREATE TYPE public.leave_type AS ENUM ('sick', 'casual', 'vacation', 'maternity', 'paternity', 'emergency');
+-- 1. Extensions & Types --------------------------------------
+create extension if not exists pgcrypto;
 
--- 2. Core Tables
--- Critical intermediary table for PostgREST compatibility
-CREATE TABLE public.user_profiles (
-    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-    employee_id TEXT NOT NULL UNIQUE,
-    email TEXT NOT NULL UNIQUE,
-    full_name TEXT NOT NULL,
-    phone TEXT,
-    department TEXT,
-    position TEXT,
-    role public.user_role DEFAULT 'employee'::public.user_role,
-    is_active BOOLEAN DEFAULT true,
-    profile_image_url TEXT,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+create type public.user_role         as enum ('admin','manager','employee');
+create type public.attendance_status as enum ('present','absent','late','half_day');
+create type public.leave_status      as enum ('pending','approved','rejected');
+create type public.leave_type        as enum ('sick','casual','vacation','maternity','paternity','emergency');
+
+-- 2. Core Tables ---------------------------------------------
+create table public.user_profiles (
+    id              uuid primary key references auth.users(id) on delete cascade,
+    employee_id     text not null unique,
+    email           text not null unique,
+    full_name       text not null,
+    phone           text,
+    department      text,
+    position        text,
+    role            public.user_role default 'employee',
+    is_active       boolean default true,
+    profile_image_url text,
+    created_at      timestamptz default current_timestamp,
+    updated_at      timestamptz default current_timestamp
 );
 
--- Attendance records
-CREATE TABLE public.attendance_records (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES public.user_profiles(id) ON DELETE CASCADE,
-    date DATE NOT NULL,
-    check_in_time TIMESTAMPTZ,
-    check_out_time TIMESTAMPTZ,
-    status public.attendance_status DEFAULT 'present'::public.attendance_status,
-    location_lat DECIMAL(10, 8),
-    location_lng DECIMAL(11, 8),
-    notes TEXT,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+create table public.attendance_records (
+    id              uuid primary key default gen_random_uuid(),
+    user_id         uuid references public.user_profiles(id) on delete cascade,
+    date            date not null,
+    check_in_time   timestamptz,
+    check_out_time  timestamptz,
+    status          public.attendance_status default 'present',
+    location_lat    decimal(10,8),
+    location_lng    decimal(11,8),
+    notes           text,
+    created_at      timestamptz default current_timestamp,
+    updated_at      timestamptz default current_timestamp
 );
 
--- Leave requests
-CREATE TABLE public.leave_requests (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES public.user_profiles(id) ON DELETE CASCADE,
-    leave_type public.leave_type NOT NULL,
-    start_date DATE NOT NULL,
-    end_date DATE NOT NULL,
-    total_days INTEGER NOT NULL,
-    reason TEXT NOT NULL,
-    status public.leave_status DEFAULT 'pending'::public.leave_status,
-    approved_by UUID REFERENCES public.user_profiles(id) ON DELETE SET NULL,
-    approved_at TIMESTAMPTZ,
-    manager_notes TEXT,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+create table public.leave_requests (
+    id            uuid primary key default gen_random_uuid(),
+    user_id       uuid references public.user_profiles(id) on delete cascade,
+    leave_type    public.leave_type not null,
+    start_date    date not null,
+    end_date      date not null,
+    total_days    integer not null,
+    reason        text not null,
+    status        public.leave_status default 'pending',
+    approved_by   uuid references public.user_profiles(id) on delete set null,
+    approved_at   timestamptz,
+    manager_notes text,
+    created_at    timestamptz default current_timestamp,
+    updated_at    timestamptz default current_timestamp
 );
 
--- Notifications
-CREATE TABLE public.notifications (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES public.user_profiles(id) ON DELETE CASCADE,
-    title TEXT NOT NULL,
-    message TEXT NOT NULL,
-    type TEXT DEFAULT 'info',
-    is_read BOOLEAN DEFAULT false,
-    data JSONB,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+create table public.notifications (
+    id         uuid primary key default gen_random_uuid(),
+    user_id    uuid references public.user_profiles(id) on delete cascade,
+    title      text not null,
+    message    text not null,
+    type       text default 'info',
+    is_read    boolean default false,
+    data       jsonb,
+    created_at timestamptz default current_timestamp
 );
 
--- 3. Essential Indexes
-CREATE INDEX idx_user_profiles_employee_id ON public.user_profiles(employee_id);
-CREATE INDEX idx_user_profiles_email ON public.user_profiles(email);
-CREATE INDEX idx_attendance_records_user_id ON public.attendance_records(user_id);
-CREATE INDEX idx_attendance_records_date ON public.attendance_records(date);
-CREATE INDEX idx_attendance_records_user_date ON public.attendance_records(user_id, date);
-CREATE INDEX idx_leave_requests_user_id ON public.leave_requests(user_id);
-CREATE INDEX idx_leave_requests_status ON public.leave_requests(status);
-CREATE INDEX idx_notifications_user_id ON public.notifications(user_id);
-CREATE INDEX idx_notifications_is_read ON public.notifications(user_id, is_read);
+-- 3. Indexes --------------------------------------------------
+create index idx_user_profiles_employee_id    on public.user_profiles(employee_id);
+create index idx_user_profiles_email          on public.user_profiles(email);
+create index idx_attendance_records_user_id   on public.attendance_records(user_id);
+create index idx_attendance_records_date      on public.attendance_records(date);
+create index idx_attendance_records_user_date on public.attendance_records(user_id, date);
+create index idx_leave_requests_user_id       on public.leave_requests(user_id);
+create index idx_leave_requests_status        on public.leave_requests(status);
+create index idx_notifications_user_id        on public.notifications(user_id);
+create index idx_notifications_is_read        on public.notifications(user_id, is_read);
 
--- 4. Functions (MUST be before RLS policies)
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER
-SECURITY DEFINER
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    INSERT INTO public.user_profiles (id, email, full_name, employee_id, role)
-    VALUES (
-        NEW.id, 
-        NEW.email, 
-        COALESCE(NEW.raw_user_meta_data->>'full_name', split_part(NEW.email, '@', 1)),
-        COALESCE(NEW.raw_user_meta_data->>'employee_id', 'EMP' || EXTRACT(EPOCH FROM NOW())::INTEGER::TEXT),
-        COALESCE((NEW.raw_user_meta_data->>'role')::public.user_role, 'employee'::public.user_role)
+-- 4. Functions -----------------------------------------------
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer as $$
+begin
+    insert into public.user_profiles (id,email,full_name,employee_id,role)
+    values (
+        new.id,
+        new.email,
+        coalesce(new.raw_user_meta_data->>'full_name', split_part(new.email,'@',1)),
+        coalesce(new.raw_user_meta_data->>'employee_id','EMP' || extract(epoch from now())::int::text),
+        coalesce((new.raw_user_meta_data->>'role')::public.user_role,'employee')
     );
-    RETURN NEW;
-END;
+    return new;
+end;
 $$;
 
--- Update trigger for updated_at
-CREATE OR REPLACE FUNCTION public.handle_updated_at()
-RETURNS TRIGGER
-SECURITY DEFINER
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    NEW.updated_at = CURRENT_TIMESTAMP;
-    RETURN NEW;
-END;
+create or replace function public.handle_updated_at()
+returns trigger
+language plpgsql
+security definer as $$
+begin
+    new.updated_at = current_timestamp;
+    return new;
+end;
 $$;
 
--- 5. Enable RLS
-ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.attendance_records ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.leave_requests ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
-
--- 6. RLS Policies using Pattern 1 & 2 (Simple, Direct)
-
--- Pattern 1: Core user table (user_profiles) - Simple only, no functions
-CREATE POLICY "users_manage_own_user_profiles"
-ON public.user_profiles
-FOR ALL
-TO authenticated
-USING (id = auth.uid())
-WITH CHECK (id = auth.uid());
-
--- Pattern 2: Simple user ownership for other tables
-CREATE POLICY "users_manage_own_attendance_records"
-ON public.attendance_records
-FOR ALL
-TO authenticated
-USING (user_id = auth.uid())
-WITH CHECK (user_id = auth.uid());
-
-CREATE POLICY "users_manage_own_leave_requests"
-ON public.leave_requests
-FOR ALL
-TO authenticated
-USING (user_id = auth.uid())
-WITH CHECK (user_id = auth.uid());
-
-CREATE POLICY "users_view_own_notifications"
-ON public.notifications
-FOR SELECT
-TO authenticated
-USING (user_id = auth.uid());
-
--- Managers can view team data using auth metadata
-CREATE OR REPLACE FUNCTION public.is_manager_from_auth()
-RETURNS BOOLEAN
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-AS $$
-SELECT EXISTS (
-    SELECT 1 FROM auth.users au
-    WHERE au.id = auth.uid() 
-    AND (au.raw_user_meta_data->>'role' IN ('admin', 'manager')
-         OR au.raw_app_meta_data->>'role' IN ('admin', 'manager'))
-)
+create or replace function public.is_manager_from_auth()
+returns boolean
+language sql
+stable
+security definer as $$
+select exists (
+    select 1 from auth.users au
+    where au.id = auth.uid()
+      and (au.raw_user_meta_data->>'role' in ('admin','manager')
+           or au.raw_app_meta_data->>'role' in ('admin','manager'))
+);
 $$;
 
--- Managers can view all attendance records
-CREATE POLICY "managers_view_all_attendance"
-ON public.attendance_records
-FOR SELECT
-TO authenticated
-USING (public.is_manager_from_auth());
+-- 5. RLS & Policies ------------------------------------------
+alter table public.user_profiles      enable row level security;
+alter table public.attendance_records enable row level security;
+alter table public.leave_requests     enable row level security;
+alter table public.notifications      enable row level security;
 
--- Managers can view all leave requests
-CREATE POLICY "managers_view_all_leave_requests"
-ON public.leave_requests
-FOR SELECT
-TO authenticated
-USING (public.is_manager_from_auth());
+create policy users_manage_own_user_profiles
+on public.user_profiles
+for all to authenticated
+using (id = auth.uid())
+with check (id = auth.uid());
 
--- 7. Triggers
-CREATE TRIGGER on_auth_user_created
-    AFTER INSERT ON auth.users
-    FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+create policy users_manage_own_attendance_records
+on public.attendance_records
+for all to authenticated
+using (user_id = auth.uid())
+with check (user_id = auth.uid());
 
-CREATE TRIGGER handle_updated_at_user_profiles
-    BEFORE UPDATE ON public.user_profiles
-    FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+create policy users_manage_own_leave_requests
+on public.leave_requests
+for all to authenticated
+using (user_id = auth.uid())
+with check (user_id = auth.uid());
 
-CREATE TRIGGER handle_updated_at_attendance_records
-    BEFORE UPDATE ON public.attendance_records
-    FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+create policy users_view_own_notifications
+on public.notifications
+for select to authenticated
+using (user_id = auth.uid());
 
-CREATE TRIGGER handle_updated_at_leave_requests
-    BEFORE UPDATE ON public.leave_requests
-    FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+create policy managers_view_all_attendance
+on public.attendance_records
+for select to authenticated
+using (public.is_manager_from_auth());
 
--- 8. Mock Data with Complete Auth Users
-DO $$
-DECLARE
-    admin_uuid UUID := gen_random_uuid();
-    manager_uuid UUID := gen_random_uuid();
-    employee1_uuid UUID := gen_random_uuid();
-    employee2_uuid UUID := gen_random_uuid();
-BEGIN
-    -- Create complete auth.users records (required for proper authentication)
-    INSERT INTO auth.users (
-        id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
-        created_at, updated_at, raw_user_meta_data, raw_app_meta_data,
-        is_sso_user, is_anonymous, confirmation_token, confirmation_sent_at,
-        recovery_token, recovery_sent_at, email_change_token_new, email_change,
-        email_change_sent_at, email_change_token_current, email_change_confirm_status,
-        reauthentication_token, reauthentication_sent_at, phone, phone_change,
-        phone_change_token, phone_change_sent_at
-    ) VALUES
-        (admin_uuid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
-         'admin@barstaff.com', crypt('admin123', gen_salt('bf', 10)), now(), now(), now(),
-         '{"full_name": "Sarah Johnson", "employee_id": "EMP001", "role": "admin"}'::jsonb, 
-         '{"provider": "email", "providers": ["email"]}'::jsonb,
-         false, false, '', null, '', null, '', '', null, '', 0, '', null, null, '', '', null),
-        (manager_uuid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
-         'manager@barstaff.com', crypt('manager123', gen_salt('bf', 10)), now(), now(), now(),
-         '{"full_name": "Mike Wilson", "employee_id": "EMP002", "role": "manager"}'::jsonb, 
-         '{"provider": "email", "providers": ["email"]}'::jsonb,
-         false, false, '', null, '', null, '', '', null, '', 0, '', null, null, '', '', null),
-        (employee1_uuid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
-         'employee1@barstaff.com', crypt('staff123', gen_salt('bf', 10)), now(), now(), now(),
-         '{"full_name": "Alex Chen", "employee_id": "EMP003", "role": "employee"}'::jsonb, 
-         '{"provider": "email", "providers": ["email"]}'::jsonb,
-         false, false, '', null, '', null, '', '', null, '', 0, '', null, null, '', '', null),
-        (employee2_uuid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
-         'employee2@barstaff.com', crypt('staff456', gen_salt('bf', 10)), now(), now(), now(),
-         '{"full_name": "Emma Davis", "employee_id": "EMP004", "role": "employee"}'::jsonb, 
-         '{"provider": "email", "providers": ["email"]}'::jsonb,
-         false, false, '', null, '', null, '', '', null, '', 0, '', null, null, '', '', null);
+create policy managers_view_all_leave_requests
+on public.leave_requests
+for select to authenticated
+using (public.is_manager_from_auth());
 
-    -- Sample attendance records
-    INSERT INTO public.attendance_records (user_id, date, check_in_time, check_out_time, status) VALUES
-        (employee1_uuid, CURRENT_DATE, 
-         CURRENT_DATE + INTERVAL '9 hours', 
-         CURRENT_DATE + INTERVAL '17 hours', 'present'),
-        (employee2_uuid, CURRENT_DATE, 
-         CURRENT_DATE + INTERVAL '9 hours 15 minutes', 
-         CURRENT_DATE + INTERVAL '17 hours 30 minutes', 'late'),
-        (employee1_uuid, CURRENT_DATE - INTERVAL '1 day', 
-         CURRENT_DATE - INTERVAL '1 day' + INTERVAL '9 hours', 
-         CURRENT_DATE - INTERVAL '1 day' + INTERVAL '17 hours', 'present');
+-- 6. Triggers -------------------------------------------------
+create trigger on_auth_user_created
+after insert on auth.users
+for each row execute function public.handle_new_user();
 
-    -- Sample leave requests
-    INSERT INTO public.leave_requests (user_id, leave_type, start_date, end_date, total_days, reason, status) VALUES
-        (employee1_uuid, 'vacation', CURRENT_DATE + INTERVAL '7 days', 
-         CURRENT_DATE + INTERVAL '9 days', 3, 'Family vacation', 'approved'),
-        (employee2_uuid, 'sick', CURRENT_DATE + INTERVAL '2 days', 
-         CURRENT_DATE + INTERVAL '3 days', 2, 'Medical appointment', 'pending');
+create trigger handle_updated_at_user_profiles
+before update on public.user_profiles
+for each row execute function public.handle_updated_at();
 
-    -- Sample notifications
-    INSERT INTO public.notifications (user_id, title, message, type) VALUES
-        (employee1_uuid, 'Leave Approved', 'Your vacation leave request has been approved.', 'success'),
-        (employee2_uuid, 'Attendance Reminder', 'Please remember to check in on time.', 'warning'),
-        (manager_uuid, 'New Leave Request', 'Emma Davis has submitted a new leave request.', 'info');
+create trigger handle_updated_at_attendance_records
+before update on public.attendance_records
+for each row execute function public.handle_updated_at();
 
-EXCEPTION
-    WHEN foreign_key_violation THEN
-        RAISE NOTICE 'Foreign key error: %', SQLERRM;
-    WHEN unique_violation THEN
-        RAISE NOTICE 'Unique constraint error: %', SQLERRM;
-    WHEN OTHERS THEN
-        RAISE NOTICE 'Unexpected error: %', SQLERRM;
-END $$;
+create trigger handle_updated_at_leave_requests
+before update on public.leave_requests
+for each row execute function public.handle_updated_at();
 
--- 9. Cleanup function for development
-CREATE OR REPLACE FUNCTION public.cleanup_mock_data()
-RETURNS VOID
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-    mock_user_ids UUID[];
-BEGIN
-    -- Get mock user IDs
-    SELECT ARRAY_AGG(id) INTO mock_user_ids
-    FROM auth.users
-    WHERE email LIKE '%@barstaff.com';
+-- 7. Mock/Test Data ------------------------------------------
+do $$
+declare
+    admin_uuid    uuid := gen_random_uuid();
+    manager_uuid  uuid := gen_random_uuid();
+    employee1_uuid uuid := gen_random_uuid();
+    employee2_uuid uuid := gen_random_uuid();
+begin
+    insert into auth.users (
+        id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,
+        created_at,updated_at,raw_user_meta_data,raw_app_meta_data,
+        is_sso_user,is_anonymous,confirmation_token,confirmation_sent_at,
+        recovery_token,recovery_sent_at,email_change_token_new,email_change,
+        email_change_sent_at,email_change_token_current,email_change_confirm_status,
+        reauthentication_token,reauthentication_sent_at,phone,phone_change,
+        phone_change_token,phone_change_sent_at
+    ) values
+        (admin_uuid,'00000000-0000-0000-0000-000000000000','authenticated','authenticated',
+         'admin@barstaff.com',crypt('admin123',gen_salt('bf',10)),now(),now(),now(),
+         '{"full_name":"Sarah Johnson","employee_id":"EMP001","role":"admin"}'::jsonb,
+         '{"provider":"email","providers":["email"]}'::jsonb,
+         false,false,'',null,'',null,'','',null,'',0,'',null,null,'','',null),
+        (manager_uuid,'00000000-0000-0000-0000-000000000000','authenticated','authenticated',
+         'manager@barstaff.com',crypt('manager123',gen_salt('bf',10)),now(),now(),now(),
+         '{"full_name":"Mike Wilson","employee_id":"EMP002","role":"manager"}'::jsonb,
+         '{"provider":"email","providers":["email"]}'::jsonb,
+         false,false,'',null,'',null,'','',null,'',0,'',null,null,'','',null),
+        (employee1_uuid,'00000000-0000-0000-0000-000000000000','authenticated','authenticated',
+         'employee1@barstaff.com',crypt('staff123',gen_salt('bf',10)),now(),now(),now(),
+         '{"full_name":"Alex Chen","employee_id":"EMP003","role":"employee"}'::jsonb,
+         '{"provider":"email","providers":["email"]}'::jsonb,
+         false,false,'',null,'',null,'','',null,'',0,'',null,null,'','',null),
+        (employee2_uuid,'00000000-0000-0000-0000-000000000000','authenticated','authenticated',
+         'employee2@barstaff.com',crypt('staff456',gen_salt('bf',10)),now(),now(),now(),
+         '{"full_name":"Emma Davis","employee_id":"EMP004","role":"employee"}'::jsonb,
+         '{"provider":"email","providers":["email"]}'::jsonb,
+         false,false,'',null,'',null,'','',null,'',0,'',null,null,'','',null);
 
-    -- Delete in dependency order
-    DELETE FROM public.notifications WHERE user_id = ANY(mock_user_ids);
-    DELETE FROM public.leave_requests WHERE user_id = ANY(mock_user_ids);
-    DELETE FROM public.attendance_records WHERE user_id = ANY(mock_user_ids);
-    DELETE FROM public.user_profiles WHERE id = ANY(mock_user_ids);
-    DELETE FROM auth.users WHERE id = ANY(mock_user_ids);
+    insert into public.attendance_records (user_id,date,check_in_time,check_out_time,status) values
+        (employee1_uuid,current_date,current_date + interval '9 hours',  current_date + interval '17 hours','present'),
+        (employee2_uuid,current_date,current_date + interval '9 hours 15 minutes',current_date + interval '17 hours 30 minutes','late'),
+        (employee1_uuid,current_date - interval '1 day',current_date - interval '1 day' + interval '9 hours',current_date - interval '1 day' + interval '17 hours','present');
 
-    RAISE NOTICE 'Mock data cleanup completed';
-EXCEPTION
-    WHEN foreign_key_violation THEN
-        RAISE NOTICE 'Foreign key constraint prevents deletion: %', SQLERRM;
-    WHEN OTHERS THEN
-        RAISE NOTICE 'Cleanup failed: %', SQLERRM;
-END;
+    insert into public.leave_requests (user_id,leave_type,start_date,end_date,total_days,reason,status) values
+        (employee1_uuid,'vacation',current_date + interval '7 days', current_date + interval '9 days',3,'Family vacation','approved'),
+        (employee2_uuid,'sick',current_date + interval '2 days', current_date + interval '3 days',2,'Medical appointment','pending');
+
+    insert into public.notifications (user_id,title,message,type) values
+        (employee1_uuid,'Leave Approved','Your vacation leave request has been approved.','success'),
+        (employee2_uuid,'Attendance Reminder','Please remember to check in on time.','warning'),
+        (manager_uuid,'New Leave Request','Emma Davis has submitted a new leave request.','info');
+exception
+    when foreign_key_violation then
+        raise notice 'Foreign key error: %', sqlerrm;
+    when unique_violation then
+        raise notice 'Unique constraint error: %', sqlerrm;
+    when others then
+        raise notice 'Unexpected error: %', sqlerrm;
+end $$;
+
+-- 8. Cleanup Function ----------------------------------------
+create or replace function public.cleanup_mock_data()
+returns void
+language plpgsql
+security definer as $$
+declare
+    mock_user_ids uuid[];
+begin
+    select array_agg(id) into mock_user_ids
+    from auth.users
+    where email like '%@barstaff.com';
+
+    delete from public.notifications      where user_id = any(mock_user_ids);
+    delete from public.leave_requests      where user_id = any(mock_user_ids);
+    delete from public.attendance_records  where user_id = any(mock_user_ids);
+    delete from public.user_profiles       where id     = any(mock_user_ids);
+    delete from auth.users                 where id     = any(mock_user_ids);
+
+    raise notice 'Mock data cleanup completed';
+exception
+    when foreign_key_violation then
+        raise notice 'Foreign key constraint prevents deletion: %', sqlerrm;
+    when others then
+        raise notice 'Cleanup failed: %', sqlerrm;
+end;
 $$;
