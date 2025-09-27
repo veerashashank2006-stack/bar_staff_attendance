@@ -3,7 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:sizer/sizer.dart';
 
 import '../../core/app_export.dart';
+import '../../routes/app_routes.dart';
 import '../../services/auth_service.dart';
+import '../../theme/app_theme.dart';
+import '../../widgets/custom_icon_widget.dart';
 import './widgets/bar_logo_widget.dart';
 import './widgets/login_form_widget.dart';
 
@@ -42,21 +45,22 @@ class _LoginScreenState extends State<LoginScreen>
       vsync: this,
     );
 
-    _fadeInAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _animationController,
-      curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
-    ));
+    _fadeInAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _animationController,
+        curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
+      ),
+    );
 
     _slideAnimation = Tween<Offset>(
       begin: const Offset(0.0, 0.3),
       end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _animationController,
-      curve: const Interval(0.3, 1.0, curve: Curves.easeOutBack),
-    ));
+    ).animate(
+      CurvedAnimation(
+        parent: _animationController,
+        curve: const Interval(0.3, 1.0, curve: Curves.easeOutBack),
+      ),
+    );
 
     _animationController.forward();
   }
@@ -89,8 +93,10 @@ class _LoginScreenState extends State<LoginScreen>
 
     try {
       // Perform authentication
-      final response =
-          await AuthService.signIn(email: email, password: password);
+      final response = await AuthService.signIn(
+        email: email,
+        password: password,
+      );
 
       if (response.user != null) {
         // Get user profile to ensure it exists
@@ -102,7 +108,8 @@ class _LoginScreenState extends State<LoginScreen>
           Navigator.pushReplacementNamed(context, AppRoutes.dashboard);
         } else {
           throw Exception(
-              'User profile not found. Please contact administrator.');
+            'User profile not found. Please contact administrator.',
+          );
         }
       } else {
         throw Exception('Authentication failed. Please try again.');
@@ -142,144 +149,129 @@ class _LoginScreenState extends State<LoginScreen>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
 
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: SafeArea(
         child: SingleChildScrollView(
-          child: Container(
-            height: 95.h,
-            padding: EdgeInsets.symmetric(horizontal: 6.w),
-            child: Column(
-              children: [
-                SizedBox(height: 8.h),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight:
+                  MediaQuery.of(context).size.height -
+                  MediaQuery.of(context).padding.top -
+                  MediaQuery.of(context).padding.bottom,
+            ),
+            child: IntrinsicHeight(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 6.w),
+                child: Column(
+                  children: [
+                    SizedBox(height: 8.h),
 
-                // Logo Section
-                FadeTransition(
-                  opacity: _fadeInAnimation,
-                  child: const BarLogoWidget(),
-                ),
-
-                SizedBox(height: 6.h),
-
-                // Welcome Text
-                SlideTransition(
-                  position: _slideAnimation,
-                  child: FadeTransition(
-                    opacity: _fadeInAnimation,
-                    child: Column(
-                      children: [
-                        Text(
-                          'Welcome Back',
-                          style: theme.textTheme.headlineSmall?.copyWith(
-                            color: colorScheme.onSurface,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        SizedBox(height: 1.h),
-                        Text(
-                          'Sign in to access your attendance dashboard',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: colorScheme.onSurface.withValues(alpha: 0.7),
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                SizedBox(height: 6.h),
-
-                // Error Message
-                if (_errorMessage != null)
-                  SlideTransition(
-                    position: _slideAnimation,
-                    child: Container(
-                      width: double.infinity,
-                      margin: EdgeInsets.only(bottom: 3.h),
-                      padding: EdgeInsets.all(4.w),
-                      decoration: BoxDecoration(
-                        color: AppTheme.error.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: AppTheme.error.withValues(alpha: 0.3),
-                          width: 1,
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          CustomIconWidget(
-                            iconName: Icons.error_outline.codePoint.toString(),
-                            color: AppTheme.error,
-                            size: 20,
-                          ),
-                          SizedBox(width: 3.w),
-                          Expanded(
-                            child: Text(
-                              _errorMessage!,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: AppTheme.error,
-                              ),
-                            ),
-                          ),
-                          IconButton(
-                            icon: CustomIconWidget(
-                              iconName: Icons.close.codePoint.toString(),
-                              color: AppTheme.error,
-                              size: 16,
-                            ),
-                            onPressed: _clearError,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                // Login Form
-                Expanded(
-                  child: SlideTransition(
-                    position: _slideAnimation,
-                    child: FadeTransition(
+                    // Logo Section
+                    FadeTransition(
                       opacity: _fadeInAnimation,
-                      child: LoginFormWidget(),
+                      child: const BarLogoWidget(),
                     ),
-                  ),
-                ),
 
-                // Preview Mode Notice (for Rocket Platform)
-                Container(
-                  margin: EdgeInsets.only(bottom: 3.h),
-                  padding: EdgeInsets.all(3.w),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: AppTheme.primary.withValues(alpha: 0.3),
-                      width: 1,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      CustomIconWidget(
-                        iconName: Icons.info_outline.codePoint.toString(),
-                        color: AppTheme.primary,
-                        size: 16,
+                    SizedBox(height: 4.h),
+
+                    // Welcome Text
+                    SlideTransition(
+                      position: _slideAnimation,
+                      child: FadeTransition(
+                        opacity: _fadeInAnimation,
+                        child: Column(
+                          children: [
+                            Text(
+                              'Welcome Back',
+                              style: theme.textTheme.headlineSmall?.copyWith(
+                                color: AppTheme.onSurface,
+                                fontWeight: FontWeight.w700,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            SizedBox(height: 1.h),
+                            Text(
+                              'Sign in to access your attendance dashboard',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: AppTheme.onSurface.withValues(
+                                  alpha: 0.7,
+                                ),
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
                       ),
-                      SizedBox(width: 2.w),
-                      Expanded(
-                        child: Text(
-                          'Demo Mode: Create an account or use existing credentials',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: AppTheme.primary,
+                    ),
+
+                    SizedBox(height: 4.h),
+
+                    // Error Message
+                    if (_errorMessage != null)
+                      SlideTransition(
+                        position: _slideAnimation,
+                        child: Container(
+                          width: double.infinity,
+                          margin: EdgeInsets.only(bottom: 3.h),
+                          padding: EdgeInsets.all(4.w),
+                          decoration: BoxDecoration(
+                            color: AppTheme.error.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppTheme.error.withValues(alpha: 0.3),
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              CustomIconWidget(
+                                iconName:
+                                    Icons.error_outline.codePoint.toString(),
+                                color: AppTheme.error,
+                                size: 20,
+                              ),
+                              SizedBox(width: 3.w),
+                              Expanded(
+                                child: Text(
+                                  _errorMessage!,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: AppTheme.error,
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                icon: CustomIconWidget(
+                                  iconName: Icons.close.codePoint.toString(),
+                                  color: AppTheme.error,
+                                  size: 16,
+                                ),
+                                onPressed: _clearError,
+                              ),
+                            ],
                           ),
                         ),
                       ),
-                    ],
-                  ),
+
+                    // Login Form
+                    Expanded(
+                      child: SlideTransition(
+                        position: _slideAnimation,
+                        child: FadeTransition(
+                          opacity: _fadeInAnimation,
+                          child: LoginFormWidget(
+                            onLogin: _handleLogin,
+                            isLoading: _isLoading,
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    SizedBox(height: 2.h),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),

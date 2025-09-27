@@ -2,10 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:sizer/sizer.dart';
 
 import '../../../core/app_export.dart';
-import '../../../services/auth_service.dart';
+import '../../../theme/app_theme.dart';
 
 class LoginFormWidget extends StatefulWidget {
-  const LoginFormWidget({super.key});
+  final Function({required String email, required String password}) onLogin;
+  final bool isLoading;
+
+  const LoginFormWidget({
+    super.key,
+    required this.onLogin,
+    required this.isLoading,
+  });
 
   @override
   State<LoginFormWidget> createState() => _LoginFormWidgetState();
@@ -16,7 +23,6 @@ class _LoginFormWidgetState extends State<LoginFormWidget> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isPasswordVisible = false;
-  bool _isLoading = false;
 
   @override
   void dispose() {
@@ -28,52 +34,24 @@ class _LoginFormWidgetState extends State<LoginFormWidget> {
   Future<void> _handleLogin() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      await AuthService.signIn(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
-      );
-
-      if (mounted) {
-        Navigator.of(context).pushReplacementNamed(AppRoutes.dashboard);
-      }
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(error.toString().replaceFirst('Exception: ', '')),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
-  void _fillCredentials(String email, String password) {
-    _emailController.text = email;
-    _passwordController.text = password;
+    widget.onLogin(
+      email: _emailController.text.trim(),
+      password: _passwordController.text.trim(),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Container(
-      padding: EdgeInsets.all(4.w),
+      padding: EdgeInsets.all(6.w),
       decoration: BoxDecoration(
-        color: Colors.white.withAlpha(230),
+        color: AppTheme.surface,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withAlpha(26),
+            color: AppTheme.shadow.withValues(alpha: 0.1),
             blurRadius: 20,
             offset: const Offset(0, 5),
           ),
@@ -83,64 +61,78 @@ class _LoginFormWidgetState extends State<LoginFormWidget> {
         key: _formKey,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              'Welcome Back',
-              style: GoogleFonts.inter(
-                fontSize: 24.sp,
-                fontWeight: FontWeight.bold,
-                color: const Color(0xFF2D3748),
-              ),
-              textAlign: TextAlign.center,
-            ),
-            SizedBox(height: 1.h),
-            Text(
-              'Sign in to your account',
-              style: GoogleFonts.inter(
-                fontSize: 14.sp,
-                color: Colors.grey[600],
-              ),
-              textAlign: TextAlign.center,
-            ),
-            SizedBox(height: 3.h),
-
             // Email Field
             TextFormField(
               controller: _emailController,
               keyboardType: TextInputType.emailAddress,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: AppTheme.onSurface,
+              ),
               decoration: InputDecoration(
                 labelText: 'Email',
-                prefixIcon: const Icon(Icons.email_outlined),
+                labelStyle: theme.textTheme.bodyMedium?.copyWith(
+                  color: AppTheme.onSurface.withValues(alpha: 0.7),
+                ),
+                prefixIcon: Icon(Icons.email_outlined, color: AppTheme.primary),
+                filled: true,
+                fillColor: AppTheme.background,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: AppTheme.outline, width: 1),
                 ),
-                filled: true,
-                fillColor: Colors.grey[50],
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: AppTheme.outline, width: 1),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: AppTheme.primary, width: 2),
+                ),
+                errorBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: AppTheme.error, width: 1),
+                ),
+                focusedErrorBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: AppTheme.error, width: 2),
+                ),
               ),
               validator: (value) {
                 if (value?.isEmpty ?? true) {
                   return 'Please enter your email';
                 }
-                if (!value!.contains('@')) {
-                  return 'Please enter a valid email';
+                if (!RegExp(
+                  r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
+                ).hasMatch(value!)) {
+                  return 'Please enter a valid email address';
                 }
                 return null;
               },
             ),
+
             SizedBox(height: 2.h),
 
             // Password Field
             TextFormField(
               controller: _passwordController,
               obscureText: !_isPasswordVisible,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: AppTheme.onSurface,
+              ),
               decoration: InputDecoration(
                 labelText: 'Password',
-                prefixIcon: const Icon(Icons.lock_outlined),
+                labelStyle: theme.textTheme.bodyMedium?.copyWith(
+                  color: AppTheme.onSurface.withValues(alpha: 0.7),
+                ),
+                prefixIcon: Icon(Icons.lock_outlined, color: AppTheme.primary),
                 suffixIcon: IconButton(
                   icon: Icon(
                     _isPasswordVisible
                         ? Icons.visibility_off
                         : Icons.visibility,
+                    color: AppTheme.onSurface.withValues(alpha: 0.7),
                   ),
                   onPressed: () {
                     setState(() {
@@ -148,149 +140,102 @@ class _LoginFormWidgetState extends State<LoginFormWidget> {
                     });
                   },
                 ),
+                filled: true,
+                fillColor: AppTheme.background,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: AppTheme.outline, width: 1),
                 ),
-                filled: true,
-                fillColor: Colors.grey[50],
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: AppTheme.outline, width: 1),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: AppTheme.primary, width: 2),
+                ),
+                errorBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: AppTheme.error, width: 1),
+                ),
+                focusedErrorBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: AppTheme.error, width: 2),
+                ),
               ),
               validator: (value) {
                 if (value?.isEmpty ?? true) {
                   return 'Please enter your password';
                 }
+                if (value!.length < 6) {
+                  return 'Password must be at least 6 characters';
+                }
                 return null;
               },
             ),
+
             SizedBox(height: 3.h),
 
             // Login Button
             ElevatedButton(
-              onPressed: _isLoading ? null : _handleLogin,
+              onPressed: widget.isLoading ? null : _handleLogin,
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF4FD1C7),
+                backgroundColor: AppTheme.primary,
+                foregroundColor: AppTheme.onPrimary,
                 padding: EdgeInsets.symmetric(vertical: 2.h),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
-                elevation: 2,
-              ),
-              child: _isLoading
-                  ? const CircularProgressIndicator(color: Colors.white)
-                  : Text(
-                      'Sign In',
-                      style: GoogleFonts.inter(
-                        fontSize: 16.sp,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
-                    ),
-            ),
-            SizedBox(height: 3.h),
-
-            // Demo Credentials Section
-            Container(
-              padding: EdgeInsets.all(3.w),
-              decoration: BoxDecoration(
-                color: const Color(0xFF4FD1C7).withAlpha(26),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: const Color(0xFF4FD1C7).withAlpha(77),
+                elevation: 0,
+                disabledBackgroundColor: AppTheme.primary.withValues(
+                  alpha: 0.5,
                 ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '🚀 Demo Credentials (Verra Organization)',
-                    style: GoogleFonts.inter(
-                      fontSize: 14.sp,
-                      fontWeight: FontWeight.w600,
-                      color: const Color(0xFF2D3748),
-                    ),
-                  ),
-                  SizedBox(height: 1.h),
-                  _buildCredentialRow(
-                    'Admin',
-                    'admin@verra.org',
-                    'admin123',
-                    Icons.admin_panel_settings,
-                    const Color(0xFF9F7AEA),
-                  ),
-                  SizedBox(height: 0.5.h),
-                  _buildCredentialRow(
-                    'Manager',
-                    'manager@verra.org',
-                    'manager123',
-                    Icons.supervisor_account,
-                    const Color(0xFF4299E1),
-                  ),
-                  SizedBox(height: 0.5.h),
-                  _buildCredentialRow(
-                    'Employee',
-                    'employee1@verra.org',
-                    'staff123',
-                    Icons.person,
-                    const Color(0xFF38A169),
-                  ),
-                  SizedBox(height: 0.5.h),
-                  _buildCredentialRow(
-                    'Employee',
-                    'employee2@verra.org',
-                    'staff456',
-                    Icons.person,
-                    const Color(0xFF38A169),
-                  ),
-                ],
-              ),
+              child:
+                  widget.isLoading
+                      ? SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            AppTheme.onPrimary,
+                          ),
+                        ),
+                      )
+                      : Text(
+                        'Sign In',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: AppTheme.onPrimary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
 
-  Widget _buildCredentialRow(
-    String role,
-    String email,
-    String password,
-    IconData icon,
-    Color color,
-  ) {
-    return InkWell(
-      onTap: () => _fillCredentials(email, password),
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: EdgeInsets.symmetric(vertical: 0.5.h, horizontal: 1.w),
-        child: Row(
-          children: [
-            Icon(icon, size: 16.sp, color: color),
-            SizedBox(width: 2.w),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '$role: $email',
-                    style: GoogleFonts.inter(
-                      fontSize: 11.sp,
-                      fontWeight: FontWeight.w500,
-                      color: const Color(0xFF2D3748),
+            SizedBox(height: 2.h),
+
+            // Create Account Link
+            Center(
+              child: TextButton(
+                onPressed: () {
+                  // TODO: Navigate to signup screen when implemented
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Account registration will be available soon',
+                      ),
+                      backgroundColor: AppTheme.warning,
                     ),
+                  );
+                },
+                child: Text(
+                  'Need an account? Contact your administrator',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: AppTheme.primary,
+                    fontWeight: FontWeight.w500,
                   ),
-                  Text(
-                    'Password: $password',
-                    style: GoogleFonts.inter(
-                      fontSize: 10.sp,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-            Icon(
-              Icons.touch_app,
-              size: 14.sp,
-              color: Colors.grey[500],
             ),
           ],
         ),
