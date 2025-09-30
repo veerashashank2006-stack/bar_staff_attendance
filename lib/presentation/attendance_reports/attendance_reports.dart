@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sizer/sizer.dart';
 import 'package:universal_html/html.dart' as html;
+import 'package:share_plus/share_plus.dart';
 
 import '../../core/app_export.dart';
 import './widgets/attendance_table_widget.dart';
@@ -324,8 +325,13 @@ class _AttendanceReportsState extends State<AttendanceReports> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Single day report exported successfully'),
+            content: Text('Single day report prepared successfully! Use the share menu to save.'),
             backgroundColor: AppTheme.success,
+            duration: Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'Got it',
+              onPressed: () {},
+            ),
           ),
         );
       }
@@ -362,13 +368,19 @@ class _AttendanceReportsState extends State<AttendanceReports> {
 
     try {
       final pdfContent = _generatePDFContent();
-      await _downloadFile(pdfContent, 'attendance_report.pdf');
+      final fileName = 'attendance_report_${_formatDate(DateTime.now()).replaceAll('/', '_')}.pdf';
+      await _downloadFile(pdfContent, fileName);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('PDF report exported successfully'),
+            content: Text('PDF report prepared successfully! Use the share menu to save.'),
             backgroundColor: AppTheme.success,
+            duration: Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'Got it',
+              onPressed: () {},
+            ),
           ),
         );
       }
@@ -397,13 +409,19 @@ class _AttendanceReportsState extends State<AttendanceReports> {
 
     try {
       final csvContent = _generateCSVContent();
-      await _downloadFile(csvContent, 'attendance_report.csv');
+      final fileName = 'attendance_report_${_formatDate(DateTime.now()).replaceAll('/', '_')}.csv';
+      await _downloadFile(csvContent, fileName);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Excel report exported successfully'),
+            content: Text('Excel report prepared successfully! Use the share menu to save.'),
             backgroundColor: AppTheme.success,
+            duration: Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'Got it',
+              onPressed: () {},
+            ),
           ),
         );
       }
@@ -457,6 +475,7 @@ class _AttendanceReportsState extends State<AttendanceReports> {
 
   Future<void> _downloadFile(String content, String filename) async {
     if (kIsWeb) {
+      // Web download remains the same
       final bytes = utf8.encode(content);
       final blob = html.Blob([bytes]);
       final url = html.Url.createObjectUrlFromBlob(blob);
@@ -465,9 +484,41 @@ class _AttendanceReportsState extends State<AttendanceReports> {
         ..click();
       html.Url.revokeObjectUrl(url);
     } else {
-      final directory = await getApplicationDocumentsDirectory();
-      final file = File('${directory.path}/$filename');
-      await file.writeAsString(content);
+      // Mobile: Use share functionality
+      try {
+        // Save to temporary directory first
+        final tempDir = await getTemporaryDirectory();
+        final file = File('${tempDir.path}/$filename');
+        await file.writeAsString(content);
+        
+        // Share the file using share_plus
+        final result = await Share.shareXFiles(
+          [XFile(file.path)],
+          text: 'Attendance Report - $filename',
+          subject: 'Attendance Report',
+        );
+        
+        // Optional: Show success message based on share result
+        if (mounted && result.status == ShareResultStatus.success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('File shared successfully - You can now save it to your device'),
+              backgroundColor: AppTheme.success,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+      } catch (e) {
+        // Handle errors
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to prepare file for sharing: ${e.toString()}'),
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+          );
+        }
+      }
     }
   }
 
